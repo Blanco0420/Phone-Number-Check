@@ -32,7 +32,7 @@ type BusinessDetails struct {
 	CompanyOverview string
 }
 
-type NumberInfo struct {
+type NumberDetails struct {
 	Number          string
 	Carrier         string
 	LineType        LineType
@@ -69,5 +69,5 @@ func NewApiConfig(apiKey, baseUrl string) *APIConfig {
 }
 
 type Source interface {
-	GetData(phoneNumber string) (*NumberInfo, error)
+	GetData(phoneNumber string) (*NumberDetails, error)
 }
