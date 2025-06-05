@@ -17,23 +17,29 @@ type SiteInfo struct {
 	Comments    []Comment
 }
 
+type LocationDetails struct {
+	Region   string
+	City     string
+	Address  string
+	PostCode string
+}
+
 type BusinessDetails struct {
 	Name            string
 	Industry        string
-	Address         string
 	Website         string
+	LocationDetails LocationDetails
 	CompanyOverview string
 }
 
 type NumberInfo struct {
-	Number       string
-	Carrier      string
-	LineType     LineType
-	FraudScore   int
-	RecentAbuse  bool
-	Region       string
-	SiteInfo     SiteInfo
-	BusinessInfo BusinessDetails
+	Number          string
+	Carrier         string
+	LineType        LineType
+	FraudScore      int
+	RecentAbuse     bool
+	SiteInfo        SiteInfo
+	BusinessDetails BusinessDetails
 }
 
 const (
