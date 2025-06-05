@@ -33,27 +33,6 @@ func Initialize(driver *webscraping.WebDriverWrapper) *JpNumberSource {
 	}
 }
 
-func (s *JpNumberSource) getLineType() (source.LineType, error) {
-
-	text, err := s.driver.GetInnerText(lineTypeSelector)
-	if err != nil {
-		return source.LineTypeUnknown, err
-	}
-	lineType := strings.ReplaceAll(strings.Split(text, ">")[0], " ", "")
-	switch lineType {
-	case "固定電話":
-		return source.LineTypeLandline, nil
-	case "携帯電話":
-		return source.LineTypeMobile, nil
-	case "フリーダイヤル":
-		return source.LineTypeTollFree, nil
-	case "IP電話":
-		return source.LineTypeVOIP, nil
-	default:
-		return source.LineTypeUnknown, nil
-	}
-}
-
 func (s *JpNumberSource) getNumberParts(number string) ([]string, error) {
 	num, err := libphonenumber.Parse(number, "JP")
 	if err != nil {
@@ -161,18 +140,23 @@ func (s *JpNumberSource) getBusinessInfo(businessContainer selenium.WebElement) 
 	if err == nil {
 		return source.BusinessDetails{}, fmt.Errorf("no business details available")
 	}
-	var businessDetails source.BusinessDetails
 
 	businessInfoElementContainer, err := businessContainer.FindElement(selenium.ByCSSSelector, "div:nth-child(2)")
 	if err != nil {
 		return source.BusinessDetails{}, err
 	}
+
+	var businessDetails source.BusinessDetails
+	var locationDetails source.LocationDetails
+
 	rows, err := businessInfoElementContainer.FindElements(selenium.ByTagName, "tr")
 	if err != nil {
 		return businessDetails, err
 	}
+
 	for _, row := range rows {
 		label, value, err := getTextFromTd(row)
+		value = strings.TrimSpace(value)
 		if err != nil {
 			fmt.Printf("ROW ERROR: \n%v\nLABEL: %s\nVALUE: %s", err, label, value)
 			continue
@@ -184,12 +168,14 @@ func (s *JpNumberSource) getBusinessInfo(businessContainer selenium.WebElement) 
 		case "Industry", "業種":
 			businessDetails.Industry = value
 		case "Address", "住所":
-			businessDetails.Address = value
+			locationDetails.Address = value
 		case "Official website", "公式サイト":
 			businessDetails.Website = value
 		case "Business", "事業紹介":
 			businessDetails.CompanyOverview = value
 		}
+
+		businessDetails.LocationDetails = locationDetails
 
 	}
 	return businessDetails, nil
@@ -203,14 +189,17 @@ func (s *JpNumberSource) GetData(number string) (source.NumberInfo, error) {
 	var siteInfo source.SiteInfo
 	s.driver.GotoUrl(numberQuery)
 
-	//Check line type exists and return line type
-	// if exists := s.driver.CheckElementExists(lineTypeSelector); exists {
-	lineType, err := s.getLineType()
-	// if err != nil {
-	// 	return source.PhoneData{}, err
-	// }
+	// Get line type
+	text, err := s.driver.GetInnerText(lineTypeSelector)
+	if err != nil {
+		return source.NumberInfo{}, err
+	}
+	rawLineType := strings.ReplaceAll(strings.Split(text, ">")[0], " ", "")
+	lineType, err := utils.GetLineType(rawLineType)
+	if err != nil {
+		return source.NumberInfo{}, err
+	}
 	data.LineType = lineType
-	// }
 
 	// goto detailed page
 	detailesPagesUrl, err := s.getDetailsPageURL(lineType, number)
@@ -230,7 +219,7 @@ func (s *JpNumberSource) GetData(number string) (source.NumberInfo, error) {
 			return source.NumberInfo{}, err
 		}
 	}
-	data.BusinessInfo = businessInfo
+	data.BusinessDetails = businessInfo
 
 	reviewCount, err := s.driver.GetInnerText("span.red")
 	if err != nil {
