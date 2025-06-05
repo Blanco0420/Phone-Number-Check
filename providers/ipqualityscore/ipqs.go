@@ -42,26 +42,26 @@ func Initialize() (*IpqsSource, error) {
 	config := source.NewApiConfig(apiKey, baseUrl)
 	return &IpqsSource{config: config}, nil
 }
-func (i *IpqsSource) GetData(phoneNumber string) (source.NumberInfo, error) {
+func (i *IpqsSource) GetData(phoneNumber string) (source.NumberDetails, error) {
 	requestUrl := strings.Replace(i.config.BaseUrl, "<NUMBER>", phoneNumber, 1)
 	res, err := i.config.HttpClient.Get(requestUrl)
 	if err != nil {
-		return source.NumberInfo{}, fmt.Errorf("Error: %v", err)
+		return source.NumberDetails{}, fmt.Errorf("Error: %v", err)
 	}
 	defer res.Body.Close()
 
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
-		return source.NumberInfo{}, err
+		return source.NumberDetails{}, err
 	}
 
 	var rawData rawApiData
 	if err := json.Unmarshal(body, &rawData); err != nil {
-		return source.NumberInfo{}, err
+		return source.NumberDetails{}, err
 	}
 
 	if !rawData.Success {
-		return source.NumberInfo{}, fmt.Errorf("Error getting data from source:\n%v", rawData.Errors)
+		return source.NumberDetails{}, fmt.Errorf("Error getting data from source:\n%v", rawData.Errors)
 	}
 
 	switch v := rawData.IdentityData.(type) {
@@ -84,10 +84,10 @@ func (i *IpqsSource) GetData(phoneNumber string) (source.NumberInfo, error) {
 
 	lineType, err := utils.GetLineType(rawData.LineType)
 	if err != nil {
-		return source.NumberInfo{}, err
+		return source.NumberDetails{}, err
 	}
 
-	data := source.NumberInfo{
+	data := source.NumberDetails{
 		Number:          phoneNumber,
 		Carrier:         rawData.Carrier,
 		LineType:        lineType,

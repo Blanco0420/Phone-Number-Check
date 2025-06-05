@@ -181,9 +181,9 @@ func (s *JpNumberSource) getBusinessInfo(businessContainer selenium.WebElement) 
 	return businessDetails, nil
 }
 
-func (s *JpNumberSource) GetData(number string) (source.NumberInfo, error) {
+func (s *JpNumberSource) GetData(number string) (source.NumberDetails, error) {
 	numberQuery := fmt.Sprintf("%s/searchnumber.do?number=%s", baseUrl, number)
-	var data source.NumberInfo
+	var data source.NumberDetails
 
 	data.Number = number
 	var siteInfo source.SiteInfo
@@ -192,43 +192,43 @@ func (s *JpNumberSource) GetData(number string) (source.NumberInfo, error) {
 	// Get line type
 	text, err := s.driver.GetInnerText(lineTypeSelector)
 	if err != nil {
-		return source.NumberInfo{}, err
+		return source.NumberDetails{}, err
 	}
 	rawLineType := strings.ReplaceAll(strings.Split(text, ">")[0], " ", "")
 	lineType, err := utils.GetLineType(rawLineType)
 	if err != nil {
-		return source.NumberInfo{}, err
+		return source.NumberDetails{}, err
 	}
 	data.LineType = lineType
 
 	// goto detailed page
 	detailesPagesUrl, err := s.getDetailsPageURL(lineType, number)
 	if err != nil {
-		return source.NumberInfo{}, err
+		return source.NumberDetails{}, err
 	}
 	s.driver.GotoUrl(detailesPagesUrl)
 
 	// businessName, err := s.driver.GetInnerText(businessSelector)
 	businessContainer, err := s.driver.FindElement("div.frame-728-green-l:nth-child(4)")
 	if err != nil {
-		return source.NumberInfo{}, err
+		return source.NumberDetails{}, err
 	}
 	businessInfo, err := s.getBusinessInfo(businessContainer)
 	if err != nil {
 		if !strings.Contains(err.Error(), "no business details available") {
-			return source.NumberInfo{}, err
+			return source.NumberDetails{}, err
 		}
 	}
 	data.BusinessDetails = businessInfo
 
 	reviewCount, err := s.driver.GetInnerText("span.red")
 	if err != nil {
-		return source.NumberInfo{}, err
+		return source.NumberDetails{}, err
 	}
 	if reviewCount != "" {
 		i, err := strconv.Atoi(reviewCount)
 		if err != nil {
-			return source.NumberInfo{}, err
+			return source.NumberDetails{}, err
 		}
 		siteInfo.ReviewCount = i
 	}
@@ -237,7 +237,7 @@ func (s *JpNumberSource) GetData(number string) (source.NumberInfo, error) {
 		comments, err := s.getComments()
 		if err != nil {
 			fmt.Printf("\n\n\n\nCOMMENTS ERROR: %s\n\n\n\n", number)
-			return source.NumberInfo{}, err
+			return source.NumberDetails{}, err
 		}
 		siteInfo.Comments = comments
 	}
