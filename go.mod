@@ -11,6 +11,8 @@ require (
 
 require (
 	github.com/blang/semver v3.5.1+incompatible // indirect
+	github.com/extrame/ole2 v0.0.0-20160812065207-d69429661ad7 // indirect
+	github.com/extrame/xls v0.0.1 // indirect
 	github.com/golang/protobuf v1.3.1 // indirect
 	github.com/ikawaha/kagome-dict v1.1.6 // indirect
 	github.com/ikawaha/kagome-dict/ipa v1.2.5 // indirect
