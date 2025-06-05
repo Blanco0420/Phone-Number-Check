@@ -2,16 +2,35 @@ package ipqualityscore
 
 import (
 	"PhoneNumberCheck/source"
+	"PhoneNumberCheck/utils"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 )
 
 type IpqsSource struct {
 	config *source.APIConfig
 }
 
-// TODO: Raw data type here
-type RawMessage struct {
+type rawApiData struct {
+	Success      bool
+	Valid        bool
+	FraudScore   int  `json:"fraud_score"`
+	RecentAbuse  bool `json:"recent_abuse"`
+	Risky        bool
+	Active       bool
+	Carrier      string
+	LineType     string `json:"line_type"`
+	City         string
+	PostCode     string `json:"zip_code"`
+	Region       string
+	Name         string
+	IdentityData any `json:"identity_data"`
+	Spammer      bool
+	ActiveStatus string `json:"active_status"`
+	Errors       []string
 }
 
 func Initialize() (*IpqsSource, error) {
@@ -19,15 +38,63 @@ func Initialize() (*IpqsSource, error) {
 	if !exists {
 		return &IpqsSource{}, fmt.Errorf("Error, apiKey environment variable not set")
 	}
-	baseUrl := "https://www.ipqualityscore.com/api/json/phone/" + apiKey
+	baseUrl := "https://www.ipqualityscore.com/api/json/phone/" + apiKey + "/<NUMBER>?country[]=JP"
 	config := source.NewApiConfig(apiKey, baseUrl)
 	return &IpqsSource{config: config}, nil
 }
-func (i *IpqsSource) GetData(phoneNumber string) (*source.NumberInfo, error) {
-	res, err := i.config.HttpClient.Get(i.config.BaseUrl + phoneNumber)
+func (i *IpqsSource) GetData(phoneNumber string) (source.NumberInfo, error) {
+	requestUrl := strings.Replace(i.config.BaseUrl, "<NUMBER>", phoneNumber, 1)
+	res, err := i.config.HttpClient.Get(requestUrl)
 	if err != nil {
-		return &source.NumberInfo{}, fmt.Errorf("Error: %v", err)
+		return source.NumberInfo{}, fmt.Errorf("Error: %v", err)
 	}
-	fmt.Println(res)
-	return &source.NumberInfo{}, nil
+	defer res.Body.Close()
+
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return source.NumberInfo{}, err
+	}
+
+	var rawData rawApiData
+	if err := json.Unmarshal(body, &rawData); err != nil {
+		return source.NumberInfo{}, err
+	}
+
+	if !rawData.Success {
+		return source.NumberInfo{}, fmt.Errorf("Error getting data from source:\n%v", rawData.Errors)
+	}
+
+	switch v := rawData.IdentityData.(type) {
+	case string:
+		fmt.Println("identityData is string", v)
+		panic("identityData")
+	case []any:
+		fmt.Println("identityData is array", v)
+		panic("identityData is array")
+	}
+
+	locationDetails := source.LocationDetails{
+		City: rawData.City,
+	}
+
+	businessDetails := source.BusinessDetails{
+		Name:            rawData.Name,
+		LocationDetails: locationDetails,
+	}
+
+	lineType, err := utils.GetLineType(rawData.LineType)
+	if err != nil {
+		return source.NumberInfo{}, err
+	}
+
+	data := source.NumberInfo{
+		Number:          phoneNumber,
+		Carrier:         rawData.Carrier,
+		LineType:        lineType,
+		FraudScore:      rawData.FraudScore,
+		BusinessDetails: businessDetails,
+		RecentAbuse:     rawData.RecentAbuse,
+	}
+
+	return data, nil
 }
