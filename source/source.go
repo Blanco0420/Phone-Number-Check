@@ -13,15 +13,17 @@ type Comment struct {
 }
 
 type SiteInfo struct {
+	AccessCount int
 	ReviewCount int
+	UserRating  float32
 	Comments    []Comment
 }
 
 type LocationDetails struct {
-	Region   string
-	City     string
-	Address  string
-	PostCode string
+	Prefecture string
+	City       string
+	Address    string
+	PostCode   string
 }
 
 type BusinessDetails struct {
@@ -38,8 +40,8 @@ type NumberDetails struct {
 	LineType        LineType
 	FraudScore      int
 	RecentAbuse     bool
-	SiteInfo        SiteInfo
 	BusinessDetails BusinessDetails
+	SiteInfo        SiteInfo
 }
 
 const (
@@ -48,6 +50,7 @@ const (
 	LineTypeLandline LineType = "landline"
 	LineTypeVOIP     LineType = "ipphone"
 	LineTypeUnknown  LineType = "unknown"
+	LineTypeOther    LineType = "other"
 )
 
 type APIConfig struct {
@@ -62,8 +65,8 @@ func NewApiConfig(apiKey, baseUrl string) *APIConfig {
 	return &APIConfig{
 		APIKey:     apiKey,
 		BaseUrl:    baseUrl,
-		Timeout:    5 * time.Second,
-		HttpClient: &http.Client{Timeout: 5 * time.Second},
+		Timeout:    10 * time.Second,
+		HttpClient: &http.Client{Timeout: 10 * time.Second},
 		Headers:    make(map[string]string),
 	}
 }

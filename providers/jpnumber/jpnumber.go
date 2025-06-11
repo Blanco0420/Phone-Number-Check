@@ -14,23 +14,33 @@ import (
 )
 
 const (
-	baseUrl             = "https://www.jpnumber.com"
-	lineTypeSelector    = ".frame-728-orange-l > table:nth-child(2) > tbody:nth-child(1) > tr:nth-child(1) > td:nth-child(1) > div:nth-child(1) > dt:nth-child(3)"
-	carrierSelector     = "div.frame-728-green-l:nth-child(2) > div:nth-child(2) > table:nth-child(1) > tbody:nth-child(1) > tr:nth-child(3) > td:nth-child(4)"
-	businessSelector    = "div.frame-728-green-l:nth-child(2) > div:nth-child(2) > table:nth-child(1) > tbody:nth-child(1) > tr:nth-child(4) > td:nth-child(4)"
-	searchSelector      = "#number"
-	commentDateSelector = ".title-background-pink table tbody tr td:nth-child(2) table  tbody tr td:nth-child(1)"
-	commentTextSelector = "div:nth-child(2) > dt:nth-child(1)"
+	baseUrl                        = "https://www.jpnumber.com"
+	initialPhoneNumberInfoSelector = ".frame-728-orange-l > table:nth-child(2) > tbody:nth-child(1) > tr:nth-child(1) > td:nth-child(1) > div:nth-child(1)"
+	lineTypeSelector               = ".frame-728-orange-l > table:nth-child(2) > tbody:nth-child(1) > tr:nth-child(1) > td:nth-child(1) > div:nth-child(1) > dt:nth-child(3)"
+	phoneNumberInfoSelector        = "div.frame-728-green-l:nth-child(2) > div:nth-child(2) > table:nth-child(1) > tbody:nth-child(1)"
+	searchSelector                 = "#number"
+	commentDateSelector            = ".title-background-pink table tbody tr td:nth-child(2) table  tbody tr td:nth-child(1)"
+	commentTextSelector            = "div:nth-child(2) > dt:nth-child(1)"
 )
+
+//TODO: Search for the city in the businessDetails Address (for each (rune?token?) check if exists in japaneseInfo)
 
 type JpNumberSource struct {
 	driver *webscraping.WebDriverWrapper
 }
 
-func Initialize(driver *webscraping.WebDriverWrapper) *JpNumberSource {
+func Initialize() (*JpNumberSource, error) {
+	driver, err := webscraping.InitializeDriver()
+	if err != nil {
+		return &JpNumberSource{}, err
+	}
 	return &JpNumberSource{
 		driver: driver,
-	}
+	}, nil
+}
+
+func (s *JpNumberSource) Close() {
+	s.driver.Close()
 }
 
 func (s *JpNumberSource) getNumberParts(number string) ([]string, error) {
@@ -94,15 +104,11 @@ func (s *JpNumberSource) getComments() ([]source.Comment, error) {
 			fmt.Println(string(elem))
 			return []source.Comment{}, fmt.Errorf("Error getting date Element: %v", err)
 		}
-		commentElement, err := elem.FindElement(selenium.ByCSSSelector, commentTextSelector)
-		if err != nil {
-			return []source.Comment{}, fmt.Errorf("Error getting comment text element: %v", err)
-		}
-		commentText, err := s.driver.GetInnerTextFromElement(commentElement)
+		commentText, err := s.driver.GetInnerText(elem, "div:nth-child(2) > dt:nth-child(1)")
 		if err != nil {
 			return []source.Comment{}, fmt.Errorf("Comment text error!\n%v\n\n", err)
 		}
-		dateText, err := s.driver.GetInnerTextFromElement(dateElement)
+		dateText, err := s.driver.GetInnerText(elem, ".title-background-pink table tbody tr td:nth-child(2) table  tbody tr td:nth-child(1)")
 		if err != nil {
 			return []source.Comment{}, fmt.Errorf("Comment date error!\n%v\n\n", err)
 		}
@@ -190,7 +196,8 @@ func (s *JpNumberSource) GetData(number string) (source.NumberDetails, error) {
 	s.driver.GotoUrl(numberQuery)
 
 	// Get line type
-	text, err := s.driver.GetInnerText(lineTypeSelector)
+	initialPhoneNumberInfoContainer, err := s.driver.FindElement(initialPhoneNumberInfoSelector)
+	text, err := s.driver.GetInnerText(initialPhoneNumberInfoContainer, "dt:nth-child(3)")
 	if err != nil {
 		return source.NumberDetails{}, err
 	}
@@ -221,7 +228,19 @@ func (s *JpNumberSource) GetData(number string) (source.NumberDetails, error) {
 	}
 	data.BusinessDetails = businessInfo
 
-	reviewCount, err := s.driver.GetInnerText("span.red")
+	//TODO: Move all of this to another function (getNumberMainInfo)
+	phoneNumberInfoContainer, err := s.driver.FindElement(phoneNumberInfoSelector)
+	if err != nil {
+		fmt.Print(err)
+		panic("phone number info container doesn't exist??")
+	}
+	prefecture, _ := s.driver.GetInnerText(phoneNumberInfoContainer, "tr:nth-child(4)>td:nth-child(2)")
+	data.BusinessDetails.LocationDetails.Prefecture = prefecture
+
+	carrier, _ := s.driver.GetInnerText(phoneNumberInfoContainer, "tr:nth-child(3)>td:nth-child(4)")
+	data.Carrier = carrier
+
+	reviewCount, err := s.driver.GetInnerText(phoneNumberInfoContainer, "span.red")
 	if err != nil {
 		return source.NumberDetails{}, err
 	}

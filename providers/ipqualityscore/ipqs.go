@@ -1,6 +1,7 @@
 package ipqualityscore
 
 import (
+	japaneseinfo "PhoneNumberCheck/japaneseInfo"
 	"PhoneNumberCheck/source"
 	"PhoneNumberCheck/utils"
 	"encoding/json"
@@ -73,8 +74,10 @@ func (i *IpqsSource) GetData(phoneNumber string) (source.NumberDetails, error) {
 		panic("identityData is array")
 	}
 
+	pref, _ := japaneseinfo.FindPrefectureByCityName(rawData.City, 2)
 	locationDetails := source.LocationDetails{
-		City: rawData.City,
+		City:       rawData.City,
+		Prefecture: pref,
 	}
 
 	businessDetails := source.BusinessDetails{

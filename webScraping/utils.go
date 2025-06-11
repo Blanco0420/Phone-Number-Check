@@ -2,6 +2,7 @@ package webscraping
 
 import (
 	"fmt"
+	"net"
 
 	"github.com/tebeka/selenium"
 	"github.com/tebeka/selenium/firefox"
@@ -12,8 +13,19 @@ type WebDriverWrapper struct {
 	service *selenium.Service
 }
 
+func getFreePort() (int, error) {
+	listener, err := net.Listen("tcp", ":0")
+	if err != nil {
+		return -1, err
+	}
+	defer listener.Close()
+
+	port := listener.Addr().(*net.TCPAddr).Port
+	return port, nil
+}
+
 func InitializeDriver() (*WebDriverWrapper, error) {
-	const port = 4444
+	port, err := getFreePort()
 	service, err := selenium.NewGeckoDriverService("geckodriver", port)
 	if err != nil {
 		return &WebDriverWrapper{}, fmt.Errorf("Error starting geckodriver service: %v", err)
@@ -39,6 +51,7 @@ func InitializeDriver() (*WebDriverWrapper, error) {
 }
 
 func (w *WebDriverWrapper) GotoUrl(url string) error {
+	fmt.Println(url)
 	return w.driver.Get(url)
 }
 
@@ -74,25 +87,37 @@ func (w *WebDriverWrapper) CheckElementExists(selector string) bool {
 	return true
 }
 
-func (w *WebDriverWrapper) GetInnerText(selector string) (string, error) {
-	elem, err := w.driver.FindElement(selenium.ByCSSSelector, selector)
+func (w *WebDriverWrapper) GetInnerText(containerElement selenium.WebElement, selector string) (string, error) {
+	elem, err := containerElement.FindElement(selenium.ByCSSSelector, selector)
 	if err != nil {
-		return "", fmt.Errorf("Error finding element with selector %s: %v", selector, err)
+		return "", err
 	}
-	text, err := w.GetInnerTextFromElement(elem)
+	text, err := elem.Text()
 	if err != nil {
 		return "", err
 	}
 	return text, nil
 }
 
-func (w *WebDriverWrapper) GetInnerTextFromElement(elem selenium.WebElement) (string, error) {
-	text, err := elem.Text()
-	if err != nil {
-		return "", fmt.Errorf("Error getting text on element %v: %v", elem, err)
-	}
-	return text, nil
-}
+// func (w *WebDriverWrapper) GetInnerText(selector string) (string, error) {
+// 	elem, err := w.driver.FindElement(selenium.ByCSSSelector, selector)
+// 	if err != nil {
+// 		return "", fmt.Errorf("Error finding element with selector %s: %v", selector, err)
+// 	}
+// 	text, err := w.GetInnerTextFromElement(elem)
+// 	if err != nil {
+// 		return "", err
+// 	}
+// 	return text, nil
+// }
+//
+// func (w *WebDriverWrapper) GetInnerTextFromElement(elem selenium.WebElement) (string, error) {
+// 	text, err := elem.Text()
+// 	if err != nil {
+// 		return "", fmt.Errorf("Error getting text on element %v: %v", elem, err)
+// 	}
+// 	return text, nil
+// }
 
 func (w *WebDriverWrapper) Close() {
 	if w.driver != nil {
