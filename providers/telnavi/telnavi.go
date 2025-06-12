@@ -106,9 +106,10 @@ func (t *TelnaviSource) getPhoneNumberInfo(data *source.NumberDetails, tableEntr
 				data.BusinessDetails.Name = extractBusinessName(val)
 			}
 		case "住所":
-			if data.BusinessDetails.LocationDetails.Address == "" {
-				addressInfo, err := getAddressInfo(val)
-				data.BusinessDetails.LocationDetails = addressInfo
+			if data.BusinessDetails.LocationDetails == (source.LocationDetails{}) {
+				if err := japaneseinfo.GetAddressInfo(val, &data.BusinessDetails.LocationDetails); err != nil {
+					return err
+				}
 			}
 		case "回線種別":
 			lineType, err := utils.GetLineType(val)
@@ -125,6 +126,10 @@ func (t *TelnaviSource) getPhoneNumberInfo(data *source.NumberDetails, tableEntr
 			}
 			data.SiteInfo.UserRating = rating
 		case "アクセス数":
+			val = strings.TrimSpace(val)
+			if val == "10回未満" {
+
+			}
 			re := regexp.MustCompile(`[^0-9]`)
 			cleanedAccessCount := re.ReplaceAllString(val, "")
 			accessCount, err := strconv.Atoi(cleanedAccessCount)
@@ -160,51 +165,16 @@ func (t *TelnaviSource) getBusinessInfo(businessDetails *source.BusinessDetails,
 
 		switch key {
 		case "事業者名":
-			businessDetails.Name = val
+			extractBusinessName(val)
 		case "住所":
 			if err := japaneseinfo.GetAddressInfo(val, &businessDetails.LocationDetails); err != nil {
 				return err
 			}
-			// postcode, exists := utils.FindPostcodeInText(val)
-			// postcode = "1138654"
-			// exists = true
-			// if exists {
-			// 	address, err := japaneseinfo.GetJapaneseInfoFromPostcode(postcode)
-			// 	if err != nil {
-			// 		return err
-			// 	}
-			// 	businessDetails.LocationDetails.City = address.City
-			// 	businessDetails.LocationDetails.Prefecture = address.Prefecture
-			// 	businessDetails.LocationDetails.PostCode = address.PostCode
-			// 	val = strings.Replace(val, postcode, "", 1)
-			// 	val = utils.CleanText(val)
-			// }
-			// businessDetails.LocationDetails.Address = val
 		}
 	}
 
 	return nil
 }
-
-// func (t *TelnaviSource) getElementOnTableWhereKeyEquals(phoneNumberInfoContainerRowElements []selenium.WebElement, key string) (selenium.WebElement, error) {
-//
-// 	var returnElement selenium.WebElement
-// 	for _, element := range phoneNumberInfoContainerRowElements {
-// 		text, err := t.driver.GetInnerText(element, "th")
-// 		if err != nil {
-// 			continue
-// 			//TODO: Fix this?
-// 		}
-// 		if text == key {
-// 			returnElement = element
-// 			break
-// 		}
-// 	}
-// 	if returnElement == nil {
-// 		return returnElement, fmt.Errorf("element not found")
-// 	}
-// 	return returnElement, nil
-// }
 
 func getCleanRating(rawUserRating string) (float32, error) {
 	var rating float32
@@ -222,6 +192,15 @@ func getCleanRating(rawUserRating string) (float32, error) {
 
 	}
 	return rating, nil
+}
+
+func (t *TelnaviSource) getUserCommentsContainer() (selenium.WebElement, error) {
+
+	userCommentsContainer, err := t.driver.FindElement("div.kuchikomi_thread_content")
+	if err != nil {
+		return userCommentsContainer, err
+	}
+	return userCommentsContainer, nil
 }
 
 func (t *TelnaviSource) getTableInformation(tableBodyElement selenium.WebElement) ([]tableEntry, error) {
@@ -254,8 +233,8 @@ func (t *TelnaviSource) getTableInformation(tableBodyElement selenium.WebElement
 func (t *TelnaviSource) GetData(phoneNumber string) (source.NumberDetails, error) {
 	var data source.NumberDetails
 	data.Number = phoneNumber
-	numberQuery := fmt.Sprintf("%s/%s", baseUrl, phoneNumber)
-	t.driver.GotoUrl(numberQuery)
+	phoneNumberInfoPageUrl := fmt.Sprintf("%s/%s", baseUrl, phoneNumber)
+	t.driver.GotoUrl(phoneNumberInfoPageUrl)
 
 	businessTableContainer, err := t.driver.FindElement("div.info_table:nth-child(1) > table > tbody:nth-child(1)")
 	if err != nil {
@@ -294,47 +273,84 @@ func (t *TelnaviSource) GetData(phoneNumber string) (source.NumberDetails, error
 	// if err != nil {
 	// 	return source.NumberDetails{}, err
 	// }
-
-	userCommentsContainer, err := t.driver.FindElement("div.kuchikomi_thread_content")
+	userCommentsContainer, err := t.getUserCommentsContainer()
 	if err != nil {
 		return source.NumberDetails{}, err
 	}
-	commentsElements, err := userCommentsContainer.FindElements(selenium.ByCSSSelector, "#thread")
+
+	paginationControlElement, err := userCommentsContainer.FindElement(selenium.ByCSSSelector, "div.paginationControl")
 	if err != nil {
-		panic(fmt.Errorf("no comments?: %v", err))
+		panic(fmt.Errorf("Error comments have no pagination element: %v", err))
 	}
-	data.SiteInfo.ReviewCount = len(commentsElements)
-
-	for _, elem := range commentsElements {
-		var comment source.Comment
-
-		tableBody, err := elem.FindElement(selenium.ByCSSSelector, "tbody")
-		if err != nil {
-			panic(fmt.Errorf("Couldn't get comment table body? %v", err))
-		}
-		dateElement, err := tableBody.FindElement(selenium.ByCSSSelector, "tr:nth-child(1) > td:nth-child(1) > time:nth-child(1)")
-		if err != nil {
-			panic(fmt.Errorf("Failed to get date element: %v", err))
-		}
-		dateString, err := dateElement.GetAttribute("content")
-		if err != nil {
-			panic(fmt.Errorf("Failed to get content attr. from date elem: %v", err))
-		}
-		formattedDate, err := utils.ParseDate("2006-01-02", dateString)
-		if err != nil {
-			panic(fmt.Errorf("Failed to parse date: %v", err))
-		}
-		comment.PostDate = formattedDate
-
-		commentText, err := t.driver.GetInnerText(tableBody, "tr:nth-child(2) > td > div")
-		if err != nil {
-			panic(fmt.Errorf("Failed to get comment text: %v", err))
-		}
-		comment.Comment = commentText
-		data.SiteInfo.Comments = append(data.SiteInfo.Comments, comment)
+	spans, err := paginationControlElement.FindElements(selenium.ByTagName, "span")
+	if err != nil {
+		panic(fmt.Errorf("Error, pagination has no span elements"))
 	}
+	pages := []int{1}
+	if len(spans) < 2 {
+		links, err := paginationControlElement.FindElements(selenium.ByTagName, "a")
+		if err != nil {
+			panic(fmt.Errorf("can't find any link elements: %v", err))
+		}
+		for _, elem := range links {
+			rawPageNumber, err := elem.Text()
+			if err != nil {
+				panic(fmt.Errorf("Couldn't get page number text: %v", err))
+			}
+			parsedPageNumber, err := strconv.Atoi(rawPageNumber)
+			if err != nil {
+				fmt.Printf("Couldn't parse %s into int: ", rawPageNumber)
+				continue
+			}
+			pages = append(pages, parsedPageNumber)
+		}
+	}
+	reviewCount := 0
 
-	// data.BusinessDetails.
+	for _, pageNumber := range pages {
+		if pageNumber != 1 {
+			t.driver.GotoUrl(fmt.Sprintf("%s?page=%d", phoneNumberInfoPageUrl, pageNumber))
+		}
+		//TODO: Make this into a function. Pretty much make everything comment wise into separated functions. And maybe later for re-usability on other providers
+		userCommentsContainer, err = t.getUserCommentsContainer()
+		if err != nil {
+			return source.NumberDetails{}, err
+		}
+		commentsElements, err := userCommentsContainer.FindElements(selenium.ByCSSSelector, "#thread")
+		if err != nil {
+			panic(fmt.Errorf("no comments?: %v", err))
+		}
+		reviewCount += len(commentsElements)
+		for _, elem := range commentsElements {
+			var comment source.Comment
+
+			tableBody, err := elem.FindElement(selenium.ByCSSSelector, "tbody")
+			if err != nil {
+				panic(fmt.Errorf("Couldn't get comment table body? %v", err))
+			}
+			dateElement, err := tableBody.FindElement(selenium.ByCSSSelector, "tr:nth-child(1) > td:nth-child(1) > time:nth-child(1)")
+			if err != nil {
+				panic(fmt.Errorf("Failed to get date element: %v", err))
+			}
+			dateString, err := dateElement.Text()
+			if err != nil {
+				panic(fmt.Errorf("Failed to get content attr. from date elem: %v", err))
+			}
+			formattedDate, err := utils.ParseDate("2006年1月2日 15時4分", dateString)
+			if err != nil {
+				panic(fmt.Errorf("Failed to parse date: %v", err))
+			}
+			comment.PostDate = formattedDate
+
+			commentText, err := t.driver.GetInnerText(tableBody, "tr:nth-child(2) > td > div")
+			if err != nil {
+				panic(fmt.Errorf("Failed to get comment text: %v", err))
+			}
+			comment.Comment = commentText
+			data.SiteInfo.Comments = append(data.SiteInfo.Comments, comment)
+		}
+	}
+	data.SiteInfo.ReviewCount = reviewCount
 
 	return data, nil
 }
