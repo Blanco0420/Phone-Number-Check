@@ -10,6 +10,7 @@ import (
 	"PhoneNumberCheck/source"
 	"encoding/json"
 	"fmt"
+	"os"
 )
 
 var (
@@ -18,10 +19,11 @@ var (
 		// "08007770319",
 		// "0366360855",
 		// "05031075729",
+		"05031595686",
 		// "05811521308",
 		// "0648642471",
 		// "0368935962",
-		"0120830068",
+		// "0120830068",
 		// "0752317111",
 		// "0356641888",
 		// "05054822807",
@@ -112,7 +114,9 @@ func main() {
 	// data = testingOutput(data, sources)
 	data = testingProvider(data, telnavi)
 	for key, val := range data {
-		fmt.Printf("source: %s\nData: %v", key, string(val))
+		if err := os.WriteFile(fmt.Sprintf("%s-output.json", key), val, 0644); err != nil {
+			panic(err)
+		}
 	}
 
 	// numberChan := make(chan string)

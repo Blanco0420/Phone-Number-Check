@@ -53,4 +53,7 @@ go.work
 .history
 .ionide
 
+*/node_modules/
+
+**test**
 # End of https://www.toptal.com/developers/gitignore/api/go,visualstudiocode,direnv

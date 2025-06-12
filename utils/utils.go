@@ -42,7 +42,7 @@ func GetLineType(rawLineType string) (source.LineType, error) {
 		return source.LineTypeMobile, nil
 	case "tollfree", "freedial", "フリーダイヤル":
 		return source.LineTypeTollFree, nil
-	case "voip", "IP電話":
+	case "voip", "ip電話":
 		return source.LineTypeVOIP, nil
 	case "premiumrate", "paging", "satellite":
 		return source.LineTypeOther, fmt.Errorf("Line type is of type other. Actual text: %s", rawLineType)

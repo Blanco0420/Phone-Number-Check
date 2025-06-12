@@ -48,7 +48,7 @@ const (
 	LineTypeMobile   LineType = "mobile"
 	LineTypeTollFree LineType = "dialfree"
 	LineTypeLandline LineType = "landline"
-	LineTypeVOIP     LineType = "ipphone"
+	LineTypeVOIP     LineType = "voip"
 	LineTypeUnknown  LineType = "unknown"
 	LineTypeOther    LineType = "other"
 )
