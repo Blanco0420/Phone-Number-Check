@@ -2,11 +2,24 @@ package japaneseinfo
 
 import (
 	"PhoneNumberCheck/source"
+	"encoding/json"
 	"fmt"
+	"os/exec"
 	"regexp"
 
 	jpostcode "github.com/syumai/go-jpostcode"
 )
+
+type jsonAddress struct {
+	success    bool
+	prefecture string
+	city       string
+	town       string
+	chome      string
+	ban        string
+	GoField    string `json:"go"`
+	left       string
+}
 
 func getJapaneseInfoFromPostcode(postcode string) (*jpostcode.Address, error) {
 	address, err := jpostcode.Find(postcode)
@@ -27,6 +40,21 @@ func findPostcodeInText(text string) (string, bool) {
 	return matches[0], true
 }
 
+func parseAddress(address string) (jsonAddress, error) {
+	//TODO: when docker container, add binary to path
+	var jsonAddress jsonAddress
+	cmd := exec.Command("./parseAddress", address)
+	out, err := cmd.Output()
+	if err != nil {
+		return jsonAddress, err
+	}
+	if err := json.Unmarshal(out, &jsonAddress); err != nil {
+		return jsonAddress, err
+	}
+
+	return jsonAddress, nil
+}
+
 func GetAddressInfo(address string, locationDetails *source.LocationDetails) error {
 	if postcode, exists := findPostcodeInText(address); exists {
 		addressInfo, err := getJapaneseInfoFromPostcode(postcode)
@@ -39,7 +67,14 @@ func GetAddressInfo(address string, locationDetails *source.LocationDetails) err
 		locationDetails.Address = address
 
 	} else {
-		//TODO: Parse address info
+		addressInfo, err := parseAddress(address)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Address: %v", addressInfo)
+		locationDetails.Prefecture = addressInfo.prefecture
+		locationDetails.City = addressInfo.city
+		locationDetails.Address = address
 	}
 	return nil
 }
