@@ -1,11 +1,14 @@
 package jpnumber
 
 import (
+	japaneseinfo "PhoneNumberCheck/japaneseInfo"
 	"PhoneNumberCheck/source"
+	"PhoneNumberCheck/types"
 	"PhoneNumberCheck/utils"
 	webscraping "PhoneNumberCheck/webScraping"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -29,6 +32,11 @@ type JpNumberSource struct {
 	driver *webscraping.WebDriverWrapper
 }
 
+type rawGraphData struct {
+	accessPoints [][]interface{}
+	searchPoints [][]interface{}
+}
+
 func Initialize() (*JpNumberSource, error) {
 	driver, err := webscraping.InitializeDriver()
 	if err != nil {
@@ -41,6 +49,75 @@ func Initialize() (*JpNumberSource, error) {
 
 func (s *JpNumberSource) Close() {
 	s.driver.Close()
+}
+
+func (s *JpNumberSource) getGraphData(*types.GraphData) error {
+	script := `
+	var callback = arguments[arguments.length - 1];
+var interval = setInterval(() => {
+  var script = document.querySelector('script.code');
+  if (script) {
+    clearInterval(interval);
+    callback(script.innerHTML); // this returns to Go
+  }
+}, 100);
+	`
+	rawScriptText, err := s.driver.ExecuteScriptAsync(script)
+	if err != nil {
+		return err
+	}
+	re := regexp.MustCompile(`(?s)var accessPoints=\[(.*?)\];`)
+	scriptText := rawScriptText.(string)
+	match := re.FindStringSubmatch(scriptText)
+
+	if len(match) > 1 {
+		graph := match[1]
+		fmt.Println("AccessPoints data:")
+		fmt.Println("[" + graph + "]")
+	} else {
+		fmt.Println("No match found.")
+	}
+
+	scriptText, ok := rawScriptText.(string)
+	if !ok || scriptText == "" {
+		return fmt.Errorf("expected string from script execution, got nil or non-string value")
+	}
+	accessPointsRegex := regexp.MustCompile(`var\s+accessPoints\s*=\s*(\[[\s\S]*?\]);`)
+	accessMatch := accessPointsRegex.FindStringSubmatch(scriptText)
+
+	if accessMatch == nil {
+		return fmt.Errorf("Could not find accessMatch....")
+	}
+
+	accessPointsStr := accessMatch[1]
+	accessPointsJson := strings.ReplaceAll(accessPointsStr, `'`, `"`)
+
+	var rawGraphData rawGraphData
+	if err := json.Unmarshal([]byte(accessPointsJson), &rawGraphData); err != nil {
+		return err
+	}
+
+	fmt.Println(accessPointsJson)
+
+	graphData := []types.GraphData{}
+	for _, row := range rawGraphData.accessPoints {
+		fmt.Printf("ROW: %v\n", row)
+		if len(row) == 2 {
+			date, _ := row[0].(string)
+			rawAccesses, _ := row[1].(string)
+			parsedDate, err := utils.ParseDate("2006-01-02", date)
+			if err != nil {
+				return err
+			}
+			accesses, err := strconv.Atoi(rawAccesses)
+			if err != nil {
+				return err
+			}
+			graphData = append(graphData, types.GraphData{Date: parsedDate, Accesses: accesses})
+		}
+	}
+
+	return nil
 }
 
 func (s *JpNumberSource) getNumberParts(number string) ([]string, error) {
@@ -83,21 +160,7 @@ func (s *JpNumberSource) getComments() ([]source.Comment, error) {
 
 	for i, elem := range commentElements {
 		dateElement, err := elem.FindElement(selenium.ByCSSSelector, commentDateSelector)
-		/*
-			TODO: This
-							Fix: Use More Robust and Readable Selector
 
-							Here’s a much simpler and resilient selector for the date inside the div.frame-728-gray-l block:
-
-							commentDateSelector := "td > table td:first-child"
-
-							If you want to scope it just a bit more strictly (but still reliably), do:
-
-							commentDateSelector := ".title-background-pink td > table td:first-child"
-		*/
-		if i == 58 {
-			fmt.Print("Here")
-		}
 		if err != nil {
 			fmt.Printf("COMMENT INDEX: %d", i)
 			elem, err := json.MarshalIndent(dateElement, "", "  ")
@@ -124,67 +187,63 @@ func (s *JpNumberSource) getComments() ([]source.Comment, error) {
 	return comments, nil
 }
 
-func getTextFromTd(row selenium.WebElement) (label string, value string, err error) {
-	cols, err := row.FindElements(selenium.ByTagName, "td")
-	if err != nil || len(cols) < 2 {
-		return "", "", fmt.Errorf("Invalid table row format")
-	}
-	label, err = cols[0].Text()
-	if err != nil {
-		return "", "", err
-	}
-	value, err = cols[1].Text()
-	if err != nil {
-		return "", "", err
-	}
-	return label, value, nil
-}
+// func getTextFromTd(row selenium.WebElement) (label string, value string, err error) {
+// 	cols, err := row.FindElements(selenium.ByTagName, "td")
+// 	if err != nil || len(cols) < 2 {
+// 		return "", "", fmt.Errorf("Invalid table row format")
+// 	}
+// 	label, err = cols[0].Text()
+// 	if err != nil {
+// 		return "", "", err
+// 	}
+// 	value, err = cols[1].Text()
+// 	if err != nil {
+// 		return "", "", err
+// 	}
+// 	return label, value, nil
+// }
 
-func (s *JpNumberSource) getBusinessInfo(businessContainer selenium.WebElement) (source.BusinessDetails, error) {
+func (s *JpNumberSource) getBusinessInfo(businessInfoTableContainer selenium.WebElement, businessDetails *source.BusinessDetails) error {
 
-	_, err := businessContainer.FindElement(selenium.ByCSSSelector, "#result-0")
+	_, err := businessInfoTableContainer.FindElement(selenium.ByCSSSelector, "#result-0")
 	if err == nil {
-		return source.BusinessDetails{}, fmt.Errorf("no business details available")
+		return fmt.Errorf("no business details available")
 	}
 
-	businessInfoElementContainer, err := businessContainer.FindElement(selenium.ByCSSSelector, "div:nth-child(2)")
+	businessInfoTableElement, err := businessInfoTableContainer.FindElement(selenium.ByCSSSelector, "div.content > table > tbody")
 	if err != nil {
-		return source.BusinessDetails{}, err
+		return err
 	}
 
-	var businessDetails source.BusinessDetails
-	var locationDetails source.LocationDetails
-
-	rows, err := businessInfoElementContainer.FindElements(selenium.ByTagName, "tr")
+	tableEntries, err := utils.GetTableInformation(s.driver, businessInfoTableElement, "td", "td")
 	if err != nil {
-		return businessDetails, err
+		return err
 	}
 
-	for _, row := range rows {
-		label, value, err := getTextFromTd(row)
-		value = strings.TrimSpace(value)
-		if err != nil {
-			fmt.Printf("ROW ERROR: \n%v\nLABEL: %s\nVALUE: %s", err, label, value)
-			continue
-		}
-		switch label {
+	// rows, err := businessInfoElementContainer.FindElements(selenium.ByTagName, "tr")
+	// if err != nil {
+	// 	return err
+	// }
+
+	for _, entry := range tableEntries {
+
+		key := entry.Key
+		value := entry.Value
+
+		switch key {
 		case "Name", "事業者名称":
 			businessDetails.Name = value
-
 		case "Industry", "業種":
 			businessDetails.Industry = value
 		case "Address", "住所":
-			locationDetails.Address = value
+			japaneseinfo.GetAddressInfo(value, &businessDetails.LocationDetails)
 		case "Official website", "公式サイト":
 			businessDetails.Website = value
 		case "Business", "事業紹介":
 			businessDetails.CompanyOverview = value
 		}
-
-		businessDetails.LocationDetails = locationDetails
-
 	}
-	return businessDetails, nil
+	return nil
 }
 
 func (s *JpNumberSource) GetData(number string) (source.NumberDetails, error) {
@@ -194,6 +253,8 @@ func (s *JpNumberSource) GetData(number string) (source.NumberDetails, error) {
 	data.Number = number
 	var siteInfo source.SiteInfo
 	s.driver.GotoUrl(numberQuery)
+
+	//TODO: use the utils getTableInfo function eventually (jpnumber is difficult and doesn't split their table by tr > th,td . Instead, tr >td,td,td,td for like 3 different key:val pairs)
 
 	// Get line type
 	initialPhoneNumberInfoContainer, err := s.driver.FindElement(initialPhoneNumberInfoSelector)
@@ -216,17 +277,20 @@ func (s *JpNumberSource) GetData(number string) (source.NumberDetails, error) {
 	s.driver.GotoUrl(detailesPagesUrl)
 
 	// businessName, err := s.driver.GetInnerText(businessSelector)
-	businessContainer, err := s.driver.FindElement("div.frame-728-green-l:nth-child(4)")
+	businessInfoTableContainer, err := s.driver.FindElement("div.frame-728-green-l:nth-child(4)")
 	if err != nil {
 		return source.NumberDetails{}, err
 	}
-	businessInfo, err := s.getBusinessInfo(businessContainer)
-	if err != nil {
-		if !strings.Contains(err.Error(), "no business details available") {
+	if err := s.getBusinessInfo(businessInfoTableContainer, &data.BusinessDetails); err != nil {
+		if strings.Contains(err.Error(), "no business details available") {
+		} else {
 			return source.NumberDetails{}, err
 		}
 	}
-	data.BusinessDetails = businessInfo
+
+	if err := s.getGraphData(&data.GraphData); err != nil {
+		return source.NumberDetails{}, err
+	}
 
 	//TODO: Move all of this to another function (getNumberMainInfo)
 	phoneNumberInfoContainer, err := s.driver.FindElement(phoneNumberInfoSelector)

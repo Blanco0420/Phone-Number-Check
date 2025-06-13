@@ -51,6 +51,9 @@ func parseAddress(address string) (jsonAddress, error) {
 	if err := json.Unmarshal(out, &jsonAddress); err != nil {
 		return jsonAddress, err
 	}
+	if jsonAddress.success == false {
+		return jsonAddress, fmt.Errorf("Error parsing date: %s", address)
+	}
 
 	return jsonAddress, nil
 }

@@ -19,7 +19,9 @@ var (
 		// "08007770319",
 		// "0366360855",
 		// "05031075729",
-		"05031595686",
+		// "0648642471",
+		"07091762683",
+		// "05031595686",
 		// "05811521308",
 		// "0648642471",
 		// "0368935962",
@@ -84,11 +86,11 @@ func main() {
 		panic(err)
 	}
 
-	jpNumberProvider, err := jpnumber.Initialize()
+	jpNumber, err := jpnumber.Initialize()
 	if err != nil {
 		panic(err)
 	}
-	defer jpNumberProvider.Close()
+	defer jpNumber.Close()
 
 	ipqsSource, err := ipqualityscore.Initialize()
 	if err != nil {
@@ -103,7 +105,7 @@ func main() {
 
 	data := map[string][]byte{}
 	sources := []source.Source{
-		jpNumberProvider,
+		jpNumber,
 		ipqsSource,
 		numverify,
 		telnavi,
@@ -112,7 +114,7 @@ func main() {
 	_ = sources
 
 	// data = testingOutput(data, sources)
-	data = testingProvider(data, telnavi)
+	data = testingProvider(data, jpNumber)
 	for key, val := range data {
 		if err := os.WriteFile(fmt.Sprintf("%s-output.json", key), val, 0644); err != nil {
 			panic(err)

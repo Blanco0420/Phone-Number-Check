@@ -34,7 +34,7 @@ func InitializeDriver() (*WebDriverWrapper, error) {
 	caps := selenium.Capabilities{"browserName": "firefox"}
 	firefoxCaps := firefox.Capabilities{
 		Args: []string{
-			// "--headless",
+			"--headless",
 		},
 	}
 	caps.AddFirefox(firefoxCaps)
@@ -51,7 +51,6 @@ func InitializeDriver() (*WebDriverWrapper, error) {
 }
 
 func (w *WebDriverWrapper) GotoUrl(url string) error {
-	fmt.Println(url)
 	return w.driver.Get(url)
 }
 
@@ -97,6 +96,21 @@ func (w *WebDriverWrapper) GetInnerText(containerElement selenium.WebElement, se
 		return "", err
 	}
 	return text, nil
+}
+
+func (w *WebDriverWrapper) ExecuteScript(script string) (any, error) {
+	res, err := w.driver.ExecuteScript(script, nil)
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+func (w *WebDriverWrapper) ExecuteScriptAsync(script string) (any, error) {
+	res, err := w.driver.ExecuteScriptAsync(script, nil)
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
 }
 
 // func (w *WebDriverWrapper) GetInnerText(selector string) (string, error) {

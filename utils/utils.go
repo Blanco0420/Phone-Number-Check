@@ -2,11 +2,15 @@ package utils
 
 import (
 	"PhoneNumberCheck/source"
+	"PhoneNumberCheck/types"
+	webscraping "PhoneNumberCheck/webScraping"
 	"fmt"
 	"os"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/tebeka/selenium"
 )
 
 /*
@@ -31,24 +35,39 @@ func CleanText(text string) string {
 	return re.ReplaceAllString(text, "")
 }
 
-func GetLineType(rawLineType string) (source.LineType, error) {
-	rawLineType = strings.TrimSpace(strings.ToLower(rawLineType))
-	rawLineType = strings.Trim(rawLineType, "-_")
+var lineTypeMap = map[string]source.LineType{
+	"landline": source.LineTypeLandline,
+	"固定電話":     source.LineTypeLandline,
 
-	switch rawLineType {
-	case "landline", "固定電話":
-		return source.LineTypeLandline, nil
-	case "mobile", "携帯電話":
-		return source.LineTypeMobile, nil
-	case "tollfree", "freedial", "フリーダイヤル":
-		return source.LineTypeTollFree, nil
-	case "voip", "ip電話":
-		return source.LineTypeVOIP, nil
-	case "premiumrate", "paging", "satellite":
-		return source.LineTypeOther, fmt.Errorf("Line type is of type other. Actual text: %s", rawLineType)
-	default:
-		return source.LineTypeUnknown, nil
+	"mobile": source.LineTypeMobile,
+	"携帯電話":   source.LineTypeMobile,
+
+	"tollfree": source.LineTypeTollFree,
+	"freedial": source.LineTypeTollFree,
+	"フリーダイヤル":  source.LineTypeTollFree,
+
+	"voip": source.LineTypeVOIP,
+	"ip電話": source.LineTypeVOIP,
+}
+
+var lineTypeOtherMap = map[string]struct{}{
+	"premiumrate": {},
+	"paging":      {},
+	"satellite":   {},
+}
+
+func GetLineType(rawLineType string) (source.LineType, error) {
+
+	cleaned := strings.TrimSpace(strings.ToLower(rawLineType))
+	cleaned = strings.Trim(rawLineType, "-_")
+	if val, ok := lineTypeMap[cleaned]; ok {
+		return val, nil
 	}
+
+	if _, ok := lineTypeOtherMap[cleaned]; ok {
+		return source.LineTypeOther, fmt.Errorf("Line type is of type other. Actual text: %s", rawLineType)
+	}
+	return source.LineTypeOther, nil
 }
 
 func CheckIfFileExists(path string) bool {
@@ -62,4 +81,37 @@ func CheckIfFileExists(path string) bool {
 	}
 
 	return false
+}
+
+func GetTableInformation(d *webscraping.WebDriverWrapper, tableBodyElement selenium.WebElement, tableKeyElementTagName string, tableValueElementTagName string) ([]types.TableEntry, error) {
+	var tableEntries []types.TableEntry
+	ignoredTableKeys := []string{"初回クチコミユーザー", "FAX番号", "市外局番", "市内局番", "加入者番号", "電話番号", "推定発信地域"}
+	phoneNumberTableContainerRowElements, err := tableBodyElement.FindElements(selenium.ByCSSSelector, "tr")
+	if err != nil {
+		panic(fmt.Errorf("Could not get phone number info table rows: %v", err))
+	}
+
+	if tableKeyElementTagName == tableValueElementTagName {
+		tableKeyElementTagName = tableKeyElementTagName + "nth-child(1)"
+		tableValueElementTagName = tableValueElementTagName + "nth-child(2)"
+	}
+
+	for _, element := range phoneNumberTableContainerRowElements {
+		key, err := d.GetInnerText(element, tableKeyElementTagName)
+		if err != nil {
+			continue
+			//TODO: Fix this?
+		}
+		value, err := d.GetInnerText(element, tableValueElementTagName)
+		if err != nil {
+			return tableEntries, err
+		}
+		for _, v := range ignoredTableKeys {
+			if key == v {
+				continue
+			}
+		}
+		tableEntries = append(tableEntries, types.TableEntry{Key: key, Value: value, Element: element})
+	}
+	return tableEntries, nil
 }

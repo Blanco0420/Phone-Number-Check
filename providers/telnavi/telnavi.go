@@ -3,6 +3,7 @@ package telnavi
 import (
 	japaneseinfo "PhoneNumberCheck/japaneseInfo"
 	"PhoneNumberCheck/source"
+	"PhoneNumberCheck/types"
 	"PhoneNumberCheck/utils"
 	webscraping "PhoneNumberCheck/webScraping"
 	"fmt"
@@ -20,12 +21,6 @@ const (
 
 type TelnaviSource struct {
 	driver *webscraping.WebDriverWrapper
-}
-
-type tableEntry struct {
-	key     string
-	value   string
-	element selenium.WebElement
 }
 
 func Initialize() (*TelnaviSource, error) {
@@ -96,10 +91,10 @@ func extractBusinessName(input string) string {
 	return ""
 }
 
-func (t *TelnaviSource) getPhoneNumberInfo(data *source.NumberDetails, tableEntries []tableEntry) error {
+func (t *TelnaviSource) getPhoneNumberInfo(data *source.NumberDetails, tableEntries []types.TableEntry) error {
 	for _, entry := range tableEntries {
-		key := entry.key
-		val := entry.value
+		key := entry.Key
+		val := entry.Value
 		switch key {
 		case "事業者名":
 			if data.BusinessDetails.Name == "" {
@@ -139,7 +134,7 @@ func (t *TelnaviSource) getPhoneNumberInfo(data *source.NumberDetails, tableEntr
 			}
 			data.SiteInfo.AccessCount = accessCount
 		case "迷惑電話度":
-			fraudScore, err := t.calculateFraudScore(entry.element)
+			fraudScore, err := t.calculateFraudScore(entry.Element)
 			if err != nil {
 				if strings.Contains(err.Error(), "no such element") {
 					data.FraudScore = 0
@@ -157,11 +152,11 @@ func (t *TelnaviSource) getPhoneNumberInfo(data *source.NumberDetails, tableEntr
 	return nil
 }
 
-func (t *TelnaviSource) getBusinessInfo(businessDetails *source.BusinessDetails, businessTableEntries []tableEntry) error {
+func (t *TelnaviSource) getBusinessInfo(businessDetails *source.BusinessDetails, businessTableEntries []types.TableEntry) error {
 	//TODO: Check if doesn't exist
 	for _, entry := range businessTableEntries {
-		key := entry.key
-		val := entry.value
+		key := entry.Key
+		val := entry.Value
 
 		switch key {
 		case "事業者名":
@@ -203,33 +198,6 @@ func (t *TelnaviSource) getUserCommentsContainer() (selenium.WebElement, error) 
 	return userCommentsContainer, nil
 }
 
-func (t *TelnaviSource) getTableInformation(tableBodyElement selenium.WebElement) ([]tableEntry, error) {
-	var tableEntries []tableEntry
-	ignoredTableKeys := []string{"初回クチコミユーザー", "FAX番号", "市外局番", "市内局番", "加入者番号", "電話番号", "推定発信地域"}
-	phoneNumberTableContainerRowElements, err := tableBodyElement.FindElements(selenium.ByCSSSelector, "tr")
-	if err != nil {
-		panic(fmt.Errorf("Could not get phone number info table rows: %v", err))
-	}
-	for _, element := range phoneNumberTableContainerRowElements {
-		key, err := t.driver.GetInnerText(element, "th")
-		if err != nil {
-			continue
-			//TODO: Fix this?
-		}
-		value, err := t.driver.GetInnerText(element, "td")
-		if err != nil {
-			return tableEntries, err
-		}
-		for _, v := range ignoredTableKeys {
-			if key == v {
-				continue
-			}
-		}
-		tableEntries = append(tableEntries, tableEntry{key: key, value: value, element: element})
-	}
-	return tableEntries, nil
-}
-
 func (t *TelnaviSource) GetData(phoneNumber string) (source.NumberDetails, error) {
 	var data source.NumberDetails
 	data.Number = phoneNumber
@@ -243,7 +211,7 @@ func (t *TelnaviSource) GetData(phoneNumber string) (source.NumberDetails, error
 			return source.NumberDetails{}, err
 		}
 	} else {
-		businessTableEntries, err := t.getTableInformation(businessTableContainer)
+		businessTableEntries, err := utils.GetTableInformation(t.driver, businessTableContainer, "th", "td")
 		if err != nil {
 			return source.NumberDetails{}, err
 		}
@@ -256,7 +224,7 @@ func (t *TelnaviSource) GetData(phoneNumber string) (source.NumberDetails, error
 		return source.NumberDetails{}, err
 	}
 
-	phoneNumberTableEntries, err := t.getTableInformation(phoneNumberTableContainer)
+	phoneNumberTableEntries, err := utils.GetTableInformation(t.driver, phoneNumberTableContainer, "th", "td")
 	if err != nil {
 		return source.NumberDetails{}, err
 	}
@@ -320,6 +288,7 @@ func (t *TelnaviSource) GetData(phoneNumber string) (source.NumberDetails, error
 		if err != nil {
 			panic(fmt.Errorf("no comments?: %v", err))
 		}
+
 		reviewCount += len(commentsElements)
 		for _, elem := range commentsElements {
 			var comment source.Comment

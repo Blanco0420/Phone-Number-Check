@@ -1,6 +1,7 @@
 package source
 
 import (
+	"PhoneNumberCheck/types"
 	"net/http"
 	"time"
 )
@@ -41,6 +42,7 @@ type NumberDetails struct {
 	FraudScore      int
 	RecentAbuse     bool
 	BusinessDetails BusinessDetails
+	GraphData       types.GraphData
 	SiteInfo        SiteInfo
 }
 
