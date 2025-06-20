@@ -1,24 +1,26 @@
 package japaneseinfo
 
 import (
-	"PhoneNumberCheck/source"
+	"PhoneNumberCheck/providers"
 	"encoding/json"
 	"fmt"
 	"os/exec"
 	"regexp"
+	"strings"
 
 	jpostcode "github.com/syumai/go-jpostcode"
 )
 
 type jsonAddress struct {
-	success    bool
-	prefecture string
-	city       string
-	town       string
-	chome      string
-	ban        string
-	GoField    string `json:"go"`
-	left       string
+	success     bool
+	prefecture  string
+	city        string
+	town        string
+	chome       string
+	ban         string
+	GoField     string `json:"go"`
+	left        string
+	errorString string
 }
 
 func getJapaneseInfoFromPostcode(postcode string) (*jpostcode.Address, error) {
@@ -51,14 +53,17 @@ func parseAddress(address string) (jsonAddress, error) {
 	if err := json.Unmarshal(out, &jsonAddress); err != nil {
 		return jsonAddress, err
 	}
-	if jsonAddress.success == false {
-		return jsonAddress, fmt.Errorf("Error parsing date: %s", address)
+	if !jsonAddress.success {
+		return jsonAddress, fmt.Errorf("error parsing address %s: %v", address, jsonAddress.errorString)
 	}
 
 	return jsonAddress, nil
 }
 
-func GetAddressInfo(address string, locationDetails *source.LocationDetails) error {
+func GetAddressInfo(address string, locationDetails *providers.LocationDetails) error {
+	if strings.TrimSpace(address) == "" {
+		return nil
+	}
 	if postcode, exists := findPostcodeInText(address); exists {
 		addressInfo, err := getJapaneseInfoFromPostcode(postcode)
 		if err != nil {
@@ -70,6 +75,7 @@ func GetAddressInfo(address string, locationDetails *source.LocationDetails) err
 		locationDetails.Address = address
 
 	} else {
+
 		addressInfo, err := parseAddress(address)
 		if err != nil {
 			return err
