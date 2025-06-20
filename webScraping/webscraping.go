@@ -3,6 +3,8 @@ package webscraping
 import (
 	"fmt"
 	"net"
+	"sync"
+	"time"
 
 	"github.com/tebeka/selenium"
 	"github.com/tebeka/selenium/firefox"
@@ -13,24 +15,29 @@ type WebDriverWrapper struct {
 	service *selenium.Service
 }
 
+var portMutex sync.Mutex
+
 func getFreePort() (int, error) {
+	portMutex.Lock()
+	defer portMutex.Unlock()
 	listener, err := net.Listen("tcp", ":0")
 	if err != nil {
 		return -1, err
 	}
 	defer listener.Close()
 
-	port := listener.Addr().(*net.TCPAddr).Port
-	return port, nil
+	return listener.Addr().(*net.TCPAddr).Port, nil
 }
 
 func InitializeDriver() (*WebDriverWrapper, error) {
 	port, err := getFreePort()
+	if err != nil {
+		return &WebDriverWrapper{}, err
+	}
 	service, err := selenium.NewGeckoDriverService("geckodriver", port)
 	if err != nil {
 		return &WebDriverWrapper{}, fmt.Errorf("Error starting geckodriver service: %v", err)
 	}
-
 	caps := selenium.Capabilities{"browserName": "firefox"}
 	firefoxCaps := firefox.Capabilities{
 		Args: []string{
@@ -38,8 +45,9 @@ func InitializeDriver() (*WebDriverWrapper, error) {
 		},
 	}
 	caps.AddFirefox(firefoxCaps)
-
 	driver, err := selenium.NewRemote(caps, fmt.Sprintf("http://localhost:%d", port))
+	//NOTE:Keep?
+	driver.SetPageLoadTimeout(15 * time.Second)
 	if err != nil {
 		return &WebDriverWrapper{}, fmt.Errorf("Error connecting to remote server: %v", err)
 	}
