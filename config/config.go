@@ -22,3 +22,14 @@ func LoadEnv() {
 		}
 	}
 }
+
+func GetEnvVariable(variableToCheck string) (string, bool) {
+	envVar := os.Getenv(variableToCheck)
+
+	if envVar != "" {
+		return envVar, true
+	}
+
+	return envVar, false
+
+}
