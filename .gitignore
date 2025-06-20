@@ -33,7 +33,7 @@
 
 # Go workspace file
 go.work
-
+__debug*
 ### VisualStudioCode ###
 .vscode/*
 # !.vscode/settings.json
