@@ -1,4 +1,4 @@
-package keywordsearching
+package profanityAnalyzing
 
 import (
 	"fmt"
@@ -98,7 +98,7 @@ func tokenizeJapanese(text string) []string {
 	return words
 }
 
-func CheckCommentForHits(comment string) (greenHits, yellowHits, redHits []string) {
+func checkCommentForHits(comment string) (greenHits, yellowHits, redHits []string) {
 	words := tokenizeJapanese(comment)
 
 	for _, word := range words {
@@ -114,3 +114,27 @@ func CheckCommentForHits(comment string) (greenHits, yellowHits, redHits []strin
 	}
 	return
 }
+
+// func ScoreComments(comments []types.Comment) int {
+// 	score := 0
+// 	for _, comment := range comments {
+// 		greenHits, yellowHits, redHits := checkCommentForHits(comment.Text)
+//
+// 		score += len(greenHits) * 1
+// 		score += len(yellowHits) * 3
+// 		score += len(redHits) * 6
+//
+// 		for key := range redLevel {
+// 			if strings.Contains(comment.Text, key) {
+// 				score += 3
+// 			}
+// 		}
+// 		for key := range yellowLevel {
+// 			if strings.Contains(comment.Text, key) {
+// 				score += 1
+// 			}
+// 		}
+//
+// 	}
+// 	return int(math.Min(float64(score), 20))
+// }
