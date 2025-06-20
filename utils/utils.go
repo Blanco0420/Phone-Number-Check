@@ -1,17 +1,30 @@
 package utils
 
 import (
-	"PhoneNumberCheck/source"
-	"PhoneNumberCheck/types"
+	"PhoneNumberCheck/providers"
 	webscraping "PhoneNumberCheck/webScraping"
+	"encoding/json"
 	"fmt"
-	"os"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/tebeka/selenium"
 )
+
+var commonSuffixes = []string{
+	"株式会社",
+	"有限会社",
+	"合同会社",
+	"球場",
+	"支店",
+	"センター",
+	"本社",
+	"営業所",
+	"店",
+}
 
 /*
 01 - month
@@ -30,24 +43,36 @@ func ParseDate(layout, date string) (time.Time, error) {
 	return parsedDate, nil
 }
 
+func CleanCompanyName(original string) (cleaned string, foundSuffixes []string) {
+	cleaned = original
+	foundSuffixes = []string{}
+	for _, suffix := range commonSuffixes {
+		if strings.Contains(cleaned, suffix) {
+			cleaned = strings.ReplaceAll(cleaned, suffix, "")
+			foundSuffixes = append(foundSuffixes, suffix)
+		}
+	}
+	return
+}
+
 func CleanText(text string) string {
 	re := regexp.MustCompile(`[^\p{L}\p{N}一]`)
 	return re.ReplaceAllString(text, "")
 }
 
-var lineTypeMap = map[string]source.LineType{
-	"landline": source.LineTypeLandline,
-	"固定電話":     source.LineTypeLandline,
+var lineTypeMap = map[string]providers.LineType{
+	"landline": providers.LineTypeLandline,
+	"固定電話":     providers.LineTypeLandline,
 
-	"mobile": source.LineTypeMobile,
-	"携帯電話":   source.LineTypeMobile,
+	"mobile": providers.LineTypeMobile,
+	"携帯電話":   providers.LineTypeMobile,
 
-	"tollfree": source.LineTypeTollFree,
-	"freedial": source.LineTypeTollFree,
-	"フリーダイヤル":  source.LineTypeTollFree,
+	"tollfree": providers.LineTypeTollFree,
+	"freedial": providers.LineTypeTollFree,
+	"フリーダイヤル":  providers.LineTypeTollFree,
 
-	"voip": source.LineTypeVOIP,
-	"ip電話": source.LineTypeVOIP,
+	"voip": providers.LineTypeVOIP,
+	"ip電話": providers.LineTypeVOIP,
 }
 
 var lineTypeOtherMap = map[string]struct{}{
@@ -56,35 +81,32 @@ var lineTypeOtherMap = map[string]struct{}{
 	"satellite":   {},
 }
 
-func GetLineType(rawLineType string) (source.LineType, error) {
-
-	cleaned := strings.TrimSpace(strings.ToLower(rawLineType))
-	cleaned = strings.Trim(rawLineType, "-_")
+func GetLineType(rawLineType string) (providers.LineType, error) {
+	cleaned := strings.TrimSpace(rawLineType)
+	cleaned = strings.ToLower(strings.Trim(rawLineType, "-_"))
 	if val, ok := lineTypeMap[cleaned]; ok {
 		return val, nil
 	}
 
 	if _, ok := lineTypeOtherMap[cleaned]; ok {
-		return source.LineTypeOther, fmt.Errorf("Line type is of type other. Actual text: %s", rawLineType)
+		return providers.LineTypeOther, fmt.Errorf("Line type is of type other. Actual text: %s", rawLineType)
 	}
-	return source.LineTypeOther, nil
+	return providers.LineTypeOther, nil
 }
 
-func CheckIfFileExists(path string) bool {
-	_, err := os.Stat(path)
-	if err == nil {
-		return true
+func AverageIntSlice(vals []int) int {
+	if len(vals) == 0 {
+		return 0
 	}
-
-	if os.IsNotExist(err) {
-		return false
+	total := 0
+	for _, v := range vals {
+		total += v
 	}
-
-	return false
+	return total / len(vals)
 }
 
-func GetTableInformation(d *webscraping.WebDriverWrapper, tableBodyElement selenium.WebElement, tableKeyElementTagName string, tableValueElementTagName string) ([]types.TableEntry, error) {
-	var tableEntries []types.TableEntry
+func GetTableInformation(d *webscraping.WebDriverWrapper, tableBodyElement selenium.WebElement, tableKeyElementTagName string, tableValueElementTagName string) ([]providers.TableEntry, error) {
+	var tableEntries []providers.TableEntry
 	ignoredTableKeys := []string{"初回クチコミユーザー", "FAX番号", "市外局番", "市内局番", "加入者番号", "電話番号", "推定発信地域"}
 	phoneNumberTableContainerRowElements, err := tableBodyElement.FindElements(selenium.ByCSSSelector, "tr")
 	if err != nil {
@@ -92,8 +114,8 @@ func GetTableInformation(d *webscraping.WebDriverWrapper, tableBodyElement selen
 	}
 
 	if tableKeyElementTagName == tableValueElementTagName {
-		tableKeyElementTagName = tableKeyElementTagName + "nth-child(1)"
-		tableValueElementTagName = tableValueElementTagName + "nth-child(2)"
+		tableKeyElementTagName = tableKeyElementTagName + ":nth-child(1)"
+		tableValueElementTagName = tableValueElementTagName + ":nth-child(2)"
 	}
 
 	for _, element := range phoneNumberTableContainerRowElements {
@@ -102,16 +124,50 @@ func GetTableInformation(d *webscraping.WebDriverWrapper, tableBodyElement selen
 			continue
 			//TODO: Fix this?
 		}
+		if slices.Contains(ignoredTableKeys, key) {
+			continue
+		}
+
 		value, err := d.GetInnerText(element, tableValueElementTagName)
 		if err != nil {
 			return tableEntries, err
 		}
-		for _, v := range ignoredTableKeys {
-			if key == v {
-				continue
-			}
-		}
-		tableEntries = append(tableEntries, types.TableEntry{Key: key, Value: value, Element: element})
+		tableEntries = append(tableEntries, providers.TableEntry{Key: key, Value: value, Element: element})
 	}
 	return tableEntries, nil
+}
+
+func ParseGraphData(rawDataString string, graphData *[]providers.GraphData) error {
+	var rawData [][]any
+	if err := json.Unmarshal([]byte(rawDataString), &rawData); err != nil {
+		return err
+	}
+	for _, row := range rawData {
+		if len(row) == 2 {
+			date, _ := row[0].(string)
+			parsedDate, err := ParseDate("2006-01-02", date)
+			if err != nil {
+				return err
+			}
+
+			var accesses int
+			switch v := row[1].(type) {
+			case float64:
+				accesses = int(v)
+			case string:
+				accesses, err = strconv.Atoi(v)
+				if err != nil {
+					return err
+				}
+			default:
+				return fmt.Errorf("Unexpected type for %q: %T", v, v)
+			}
+
+			if err != nil {
+				return err
+			}
+			*graphData = append(*graphData, providers.GraphData{Date: parsedDate, Accesses: accesses})
+		}
+	}
+	return nil
 }
