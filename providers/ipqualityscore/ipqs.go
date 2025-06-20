@@ -2,7 +2,7 @@ package ipqualityscore
 
 import (
 	japaneseinfo "PhoneNumberCheck/japaneseInfo"
-	"PhoneNumberCheck/source"
+	"PhoneNumberCheck/providers"
 	"PhoneNumberCheck/utils"
 	"encoding/json"
 	"fmt"
@@ -12,7 +12,16 @@ import (
 )
 
 type IpqsSource struct {
-	config *source.APIConfig
+	config           *providers.APIConfig
+	vitalInfoChannel chan providers.VitalInfo
+}
+
+func (i *IpqsSource) VitalInfoChannel() <-chan providers.VitalInfo {
+	return i.vitalInfoChannel
+}
+
+func (i *IpqsSource) CloseVitalInfoChannel() {
+	close(i.vitalInfoChannel)
 }
 
 type rawApiData struct {
@@ -40,29 +49,29 @@ func Initialize() (*IpqsSource, error) {
 		return &IpqsSource{}, fmt.Errorf("Error, apiKey environment variable not set")
 	}
 	baseUrl := "https://www.ipqualityscore.com/api/json/phone/" + apiKey + "/<NUMBER>?country[]=JP"
-	config := source.NewApiConfig(apiKey, baseUrl)
-	return &IpqsSource{config: config}, nil
+	config := providers.NewApiConfig(apiKey, baseUrl)
+	return &IpqsSource{config: config, vitalInfoChannel: make(chan providers.VitalInfo)}, nil
 }
-func (i *IpqsSource) GetData(phoneNumber string) (source.NumberDetails, error) {
+func (i *IpqsSource) GetData(phoneNumber string) (providers.NumberDetails, error) {
 	requestUrl := strings.Replace(i.config.BaseUrl, "<NUMBER>", phoneNumber, 1)
 	res, err := i.config.HttpClient.Get(requestUrl)
 	if err != nil {
-		return source.NumberDetails{}, fmt.Errorf("Error: %v", err)
+		return providers.NumberDetails{}, fmt.Errorf("Error: %v", err)
 	}
 	defer res.Body.Close()
 
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
-		return source.NumberDetails{}, err
+		return providers.NumberDetails{}, err
 	}
 
 	var rawData rawApiData
 	if err := json.Unmarshal(body, &rawData); err != nil {
-		return source.NumberDetails{}, err
+		return providers.NumberDetails{}, err
 	}
 
 	if !rawData.Success {
-		return source.NumberDetails{}, fmt.Errorf("Error getting data from source:\n%v", rawData.Errors)
+		return providers.NumberDetails{}, fmt.Errorf("Error getting data from source:\n%v", rawData.Errors)
 	}
 
 	switch v := rawData.IdentityData.(type) {
@@ -74,29 +83,26 @@ func (i *IpqsSource) GetData(phoneNumber string) (source.NumberDetails, error) {
 		panic("identityData is array")
 	}
 
-	pref, _ := japaneseinfo.FindPrefectureByCityName(rawData.City, 2)
-	locationDetails := source.LocationDetails{
-		City:       rawData.City,
-		Prefecture: pref,
-	}
-
-	businessDetails := source.BusinessDetails{
-		Name:            rawData.Name,
-		LocationDetails: locationDetails,
-	}
-
 	lineType, err := utils.GetLineType(rawData.LineType)
 	if err != nil {
-		return source.NumberDetails{}, err
+		return providers.NumberDetails{}, err
 	}
 
-	data := source.NumberDetails{
-		Number:          phoneNumber,
-		Carrier:         rawData.Carrier,
-		LineType:        lineType,
-		FraudScore:      rawData.FraudScore,
-		BusinessDetails: businessDetails,
-		RecentAbuse:     rawData.RecentAbuse,
+	data := providers.NumberDetails{
+		Number:  phoneNumber,
+		Carrier: rawData.Carrier,
+		VitalInfo: providers.VitalInfo{
+			LineType: lineType,
+			Name:     rawData.Name,
+			FraudulentDetails: providers.FraudulentDetails{
+				FraudScore:  rawData.FraudScore,
+				RecentAbuse: rawData.RecentAbuse,
+			},
+		},
+	}
+
+	if err := japaneseinfo.GetAddressInfo(fmt.Sprintf("%s%s", rawData.Region, rawData.City), &data.BusinessDetails.LocationDetails); err != nil {
+		return data, err
 	}
 
 	return data, nil

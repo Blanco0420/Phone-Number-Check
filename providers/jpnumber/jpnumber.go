@@ -2,8 +2,8 @@ package jpnumber
 
 import (
 	japaneseinfo "PhoneNumberCheck/japaneseInfo"
-	"PhoneNumberCheck/source"
-	"PhoneNumberCheck/types"
+	providerdataprocessing "PhoneNumberCheck/providerDataProcessing"
+	"PhoneNumberCheck/providers"
 	"PhoneNumberCheck/utils"
 	webscraping "PhoneNumberCheck/webScraping"
 	"encoding/json"
@@ -29,12 +29,17 @@ const (
 //TODO: Search for the city in the businessDetails Address (for each (rune?token?) check if exists in japaneseInfo)
 
 type JpNumberSource struct {
-	driver *webscraping.WebDriverWrapper
+	driver           *webscraping.WebDriverWrapper
+	vitalInfoChannel chan providers.VitalInfo
+	currentVitalInfo *providers.VitalInfo
 }
 
-type rawGraphData struct {
-	accessPoints [][]interface{}
-	searchPoints [][]interface{}
+func (s *JpNumberSource) VitalInfoChannel() <-chan providers.VitalInfo {
+	return s.vitalInfoChannel
+}
+
+func (s *JpNumberSource) CloseVitalInfoChannel() {
+	close(s.vitalInfoChannel)
 }
 
 func Initialize() (*JpNumberSource, error) {
@@ -43,7 +48,8 @@ func Initialize() (*JpNumberSource, error) {
 		return &JpNumberSource{}, err
 	}
 	return &JpNumberSource{
-		driver: driver,
+		driver:           driver,
+		vitalInfoChannel: make(chan providers.VitalInfo),
 	}, nil
 }
 
@@ -51,7 +57,8 @@ func (s *JpNumberSource) Close() {
 	s.driver.Close()
 }
 
-func (s *JpNumberSource) getGraphData(*types.GraphData) error {
+func (s *JpNumberSource) getGraphData(graphData *[]providers.GraphData) error {
+	fmt.Println("Getting graph data...")
 	script := `
 	var callback = arguments[arguments.length - 1];
 var interval = setInterval(() => {
@@ -70,53 +77,15 @@ var interval = setInterval(() => {
 	scriptText := rawScriptText.(string)
 	match := re.FindStringSubmatch(scriptText)
 
-	if len(match) > 1 {
-		graph := match[1]
-		fmt.Println("AccessPoints data:")
-		fmt.Println("[" + graph + "]")
-	} else {
-		fmt.Println("No match found.")
+	if len(match) == 1 {
+		return fmt.Errorf("No match found.")
 	}
 
-	scriptText, ok := rawScriptText.(string)
-	if !ok || scriptText == "" {
-		return fmt.Errorf("expected string from script execution, got nil or non-string value")
-	}
-	accessPointsRegex := regexp.MustCompile(`var\s+accessPoints\s*=\s*(\[[\s\S]*?\]);`)
-	accessMatch := accessPointsRegex.FindStringSubmatch(scriptText)
-
-	if accessMatch == nil {
-		return fmt.Errorf("Could not find accessMatch....")
-	}
-
-	accessPointsStr := accessMatch[1]
-	accessPointsJson := strings.ReplaceAll(accessPointsStr, `'`, `"`)
-
-	var rawGraphData rawGraphData
-	if err := json.Unmarshal([]byte(accessPointsJson), &rawGraphData); err != nil {
+	rawGraphDataString := match[1]
+	rawGraphDataString = fmt.Sprintf("[%v]", strings.ReplaceAll(rawGraphDataString, "'", "\""))
+	if err := utils.ParseGraphData(rawGraphDataString, graphData); err != nil {
 		return err
 	}
-
-	fmt.Println(accessPointsJson)
-
-	graphData := []types.GraphData{}
-	for _, row := range rawGraphData.accessPoints {
-		fmt.Printf("ROW: %v\n", row)
-		if len(row) == 2 {
-			date, _ := row[0].(string)
-			rawAccesses, _ := row[1].(string)
-			parsedDate, err := utils.ParseDate("2006-01-02", date)
-			if err != nil {
-				return err
-			}
-			accesses, err := strconv.Atoi(rawAccesses)
-			if err != nil {
-				return err
-			}
-			graphData = append(graphData, types.GraphData{Date: parsedDate, Accesses: accesses})
-		}
-	}
-
 	return nil
 }
 
@@ -128,15 +97,16 @@ func (s *JpNumberSource) getNumberParts(number string) ([]string, error) {
 	return strings.Split(libphonenumber.Format(num, libphonenumber.NATIONAL), "-"), nil
 }
 
-func (s *JpNumberSource) getDetailsPageURL(lineType source.LineType, number string) (string, error) {
+func (s *JpNumberSource) getDetailsPageURL(lineType providers.LineType, number string) (string, error) {
+	fmt.Println("Gettings detailed page url")
 	// https://www.jpnumber.com/ipphone/numberinfo_050_5482_2807.html
 	var url = baseUrl
 	switch lineType {
-	case source.LineTypeMobile:
+	case providers.LineTypeMobile:
 		url = url + "/mobile"
-	case source.LineTypeTollFree:
+	case providers.LineTypeTollFree:
 		url = url + "/freedial"
-	case source.LineTypeVOIP:
+	case providers.LineTypeVOIP:
 		url = url + "/ipphone"
 	}
 	parts, err := s.getNumberParts(number)
@@ -146,16 +116,17 @@ func (s *JpNumberSource) getDetailsPageURL(lineType source.LineType, number stri
 	return url + fmt.Sprintf("/numberinfo_%s_%s_%s.html", parts[0], parts[1], parts[2]), nil
 }
 
-func (s *JpNumberSource) getComments() ([]source.Comment, error) {
-	var comments []source.Comment
+func (s *JpNumberSource) getComments() ([]providers.Comment, error) {
+	fmt.Println("getting comments...")
+	var comments []providers.Comment
 	commentsContainer, err := s.driver.FindElement("#result-main-right > span:nth-child(6)")
 	if err != nil {
-		return []source.Comment{}, err
+		return []providers.Comment{}, err
 	}
 	commentElements, err := commentsContainer.FindElements(selenium.ByCSSSelector, "div.frame-728-gray-l")
 	commentElements = commentElements[:len(commentElements)-1]
 	if err != nil {
-		return []source.Comment{}, err
+		return []providers.Comment{}, err
 	}
 
 	for i, elem := range commentElements {
@@ -165,23 +136,23 @@ func (s *JpNumberSource) getComments() ([]source.Comment, error) {
 			fmt.Printf("COMMENT INDEX: %d", i)
 			elem, err := json.MarshalIndent(dateElement, "", "  ")
 			fmt.Println(string(elem))
-			return []source.Comment{}, fmt.Errorf("Error getting date Element: %v", err)
+			return []providers.Comment{}, fmt.Errorf("Error getting date Element: %v", err)
 		}
 		commentText, err := s.driver.GetInnerText(elem, "div:nth-child(2) > dt:nth-child(1)")
 		if err != nil {
-			return []source.Comment{}, fmt.Errorf("Comment text error!\n%v\n\n", err)
+			return []providers.Comment{}, fmt.Errorf("Comment text error!\n%v\n\n", err)
 		}
 		dateText, err := s.driver.GetInnerText(elem, ".title-background-pink table tbody tr td:nth-child(2) table  tbody tr td:nth-child(1)")
 		if err != nil {
-			return []source.Comment{}, fmt.Errorf("Comment date error!\n%v\n\n", err)
+			return []providers.Comment{}, fmt.Errorf("Comment date error!\n%v\n\n", err)
 		}
 
 		parsedDate, err := utils.ParseDate("2006/01/02 15:04:05", dateText)
 		if err != nil {
-			return []source.Comment{}, fmt.Errorf("Parsing date error:\n%v\n\n", err)
+			return []providers.Comment{}, fmt.Errorf("Parsing date error:\n%v\n\n", err)
 		}
 
-		comments = append(comments, source.Comment{Comment: commentText, PostDate: parsedDate})
+		comments = append(comments, providers.Comment{Text: commentText, PostDate: parsedDate})
 
 	}
 	return comments, nil
@@ -203,16 +174,20 @@ func (s *JpNumberSource) getComments() ([]source.Comment, error) {
 // 	return label, value, nil
 // }
 
-func (s *JpNumberSource) getBusinessInfo(businessInfoTableContainer selenium.WebElement, businessDetails *source.BusinessDetails) error {
+func (s *JpNumberSource) getBusinessInfo(data *providers.NumberDetails, businessDetails *providers.BusinessDetails) error {
 
-	_, err := businessInfoTableContainer.FindElement(selenium.ByCSSSelector, "#result-0")
-	if err == nil {
+	fmt.Println("getting business info")
+	businessInfoTableContainer, err := s.driver.FindElement("div.frame-728-green-l:nth-child(4)")
+	if err != nil {
 		return fmt.Errorf("no business details available")
 	}
 
 	businessInfoTableElement, err := businessInfoTableContainer.FindElement(selenium.ByCSSSelector, "div.content > table > tbody")
 	if err != nil {
-		return err
+		if strings.Contains(err.Error(), "no such element") {
+		} else {
+			return err
+		}
 	}
 
 	tableEntries, err := utils.GetTableInformation(s.driver, businessInfoTableElement, "td", "td")
@@ -232,64 +207,62 @@ func (s *JpNumberSource) getBusinessInfo(businessInfoTableContainer selenium.Web
 
 		switch key {
 		case "Name", "事業者名称":
-			businessDetails.Name = value
+			cleanName, suffixes := utils.CleanCompanyName(value)
+			data.BusinessDetails.NameSuffixes = suffixes
+			s.currentVitalInfo.Name = cleanName
+			s.vitalInfoChannel <- *s.currentVitalInfo
 		case "Industry", "業種":
-			businessDetails.Industry = value
+			s.currentVitalInfo.Industry = value
+			s.vitalInfoChannel <- *s.currentVitalInfo
 		case "Address", "住所":
 			japaneseinfo.GetAddressInfo(value, &businessDetails.LocationDetails)
 		case "Official website", "公式サイト":
 			businessDetails.Website = value
 		case "Business", "事業紹介":
-			businessDetails.CompanyOverview = value
+			s.currentVitalInfo.CompanyOverview = value
+			s.vitalInfoChannel <- *s.currentVitalInfo
 		}
 	}
 	return nil
 }
 
-func (s *JpNumberSource) GetData(number string) (source.NumberDetails, error) {
+func (s *JpNumberSource) GetData(number string) (providers.NumberDetails, error) {
 	numberQuery := fmt.Sprintf("%s/searchnumber.do?number=%s", baseUrl, number)
-	var data source.NumberDetails
+	var data providers.NumberDetails
+	s.currentVitalInfo = &data.VitalInfo
 
 	data.Number = number
-	var siteInfo source.SiteInfo
+	var siteInfo providers.SiteInfo
 	s.driver.GotoUrl(numberQuery)
-
+	fmt.Println("went to page..")
 	//TODO: use the utils getTableInfo function eventually (jpnumber is difficult and doesn't split their table by tr > th,td . Instead, tr >td,td,td,td for like 3 different key:val pairs)
 
 	// Get line type
 	initialPhoneNumberInfoContainer, err := s.driver.FindElement(initialPhoneNumberInfoSelector)
 	text, err := s.driver.GetInnerText(initialPhoneNumberInfoContainer, "dt:nth-child(3)")
 	if err != nil {
-		return source.NumberDetails{}, err
+		return data, err
 	}
 	rawLineType := strings.ReplaceAll(strings.Split(text, ">")[0], " ", "")
 	lineType, err := utils.GetLineType(rawLineType)
 	if err != nil {
-		return source.NumberDetails{}, err
+		return data, err
 	}
-	data.LineType = lineType
+	s.currentVitalInfo.LineType = lineType
+	s.vitalInfoChannel <- *s.currentVitalInfo
 
 	// goto detailed page
 	detailesPagesUrl, err := s.getDetailsPageURL(lineType, number)
 	if err != nil {
-		return source.NumberDetails{}, err
+		return data, err
 	}
 	s.driver.GotoUrl(detailesPagesUrl)
 
-	// businessName, err := s.driver.GetInnerText(businessSelector)
-	businessInfoTableContainer, err := s.driver.FindElement("div.frame-728-green-l:nth-child(4)")
-	if err != nil {
-		return source.NumberDetails{}, err
-	}
-	if err := s.getBusinessInfo(businessInfoTableContainer, &data.BusinessDetails); err != nil {
+	if err := s.getBusinessInfo(&data, &data.BusinessDetails); err != nil {
 		if strings.Contains(err.Error(), "no business details available") {
 		} else {
-			return source.NumberDetails{}, err
+			return data, err
 		}
-	}
-
-	if err := s.getGraphData(&data.GraphData); err != nil {
-		return source.NumberDetails{}, err
 	}
 
 	//TODO: Move all of this to another function (getNumberMainInfo)
@@ -306,12 +279,12 @@ func (s *JpNumberSource) GetData(number string) (source.NumberDetails, error) {
 
 	reviewCount, err := s.driver.GetInnerText(phoneNumberInfoContainer, "span.red")
 	if err != nil {
-		return source.NumberDetails{}, err
+		return data, err
 	}
 	if reviewCount != "" {
 		i, err := strconv.Atoi(reviewCount)
 		if err != nil {
-			return source.NumberDetails{}, err
+			return data, err
 		}
 		siteInfo.ReviewCount = i
 	}
@@ -320,12 +293,26 @@ func (s *JpNumberSource) GetData(number string) (source.NumberDetails, error) {
 		comments, err := s.getComments()
 		if err != nil {
 			fmt.Printf("\n\n\n\nCOMMENTS ERROR: %s\n\n\n\n", number)
-			return source.NumberDetails{}, err
+			return data, err
 		}
 		siteInfo.Comments = comments
 	}
 
 	data.SiteInfo = siteInfo
+
+	var graphData []providers.GraphData
+	if err := s.getGraphData(&graphData); err != nil {
+		return data, err
+	}
+
+	numberRiskInput := providerdataprocessing.NumberRiskInput{
+		SourceName:  "jpnumber",
+		GraphData:   graphData,
+		Comments:    data.SiteInfo.Comments,
+		RecentAbuse: &data.VitalInfo.FraudulentDetails.RecentAbuse,
+	}
+	s.currentVitalInfo.OverallFraudScore = providerdataprocessing.EvaluateSource(numberRiskInput)
+	s.vitalInfoChannel <- *s.currentVitalInfo
 
 	return data, nil
 }

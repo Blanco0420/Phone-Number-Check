@@ -1,15 +1,25 @@
-package source
+package providers
 
 import (
-	"PhoneNumberCheck/types"
 	"net/http"
 	"time"
+
+	"github.com/tebeka/selenium"
 )
 
-type LineType string
+type TableEntry struct {
+	Key     string
+	Value   string
+	Element selenium.WebElement
+}
+
+type GraphData struct {
+	Date     time.Time
+	Accesses int
+}
 
 type Comment struct {
-	Comment  string
+	Text     string
 	PostDate time.Time
 }
 
@@ -28,23 +38,34 @@ type LocationDetails struct {
 }
 
 type BusinessDetails struct {
-	Name            string
-	Industry        string
 	Website         string
 	LocationDetails LocationDetails
-	CompanyOverview string
+	NameSuffixes    []string
+}
+
+type VitalInfo struct {
+	Name              string
+	Industry          string
+	CompanyOverview   string
+	LineType          LineType
+	OverallFraudScore int
+	FraudulentDetails FraudulentDetails
 }
 
 type NumberDetails struct {
 	Number          string
 	Carrier         string
-	LineType        LineType
-	FraudScore      int
-	RecentAbuse     bool
+	VitalInfo       VitalInfo
 	BusinessDetails BusinessDetails
-	GraphData       types.GraphData
 	SiteInfo        SiteInfo
 }
+
+type FraudulentDetails struct {
+	FraudScore  int
+	RecentAbuse bool
+}
+
+type LineType string
 
 const (
 	LineTypeMobile   LineType = "mobile"
@@ -61,18 +82,4 @@ type APIConfig struct {
 	Timeout    time.Duration
 	HttpClient *http.Client
 	Headers    map[string]string
-}
-
-func NewApiConfig(apiKey, baseUrl string) *APIConfig {
-	return &APIConfig{
-		APIKey:     apiKey,
-		BaseUrl:    baseUrl,
-		Timeout:    10 * time.Second,
-		HttpClient: &http.Client{Timeout: 10 * time.Second},
-		Headers:    make(map[string]string),
-	}
-}
-
-type Source interface {
-	GetData(phoneNumber string) (NumberDetails, error)
 }

@@ -1,7 +1,7 @@
 package numverify
 
 import (
-	"PhoneNumberCheck/source"
+	"PhoneNumberCheck/providers"
 	"PhoneNumberCheck/utils"
 	"encoding/json"
 	"errors"
@@ -12,7 +12,8 @@ import (
 )
 
 type NumverifySource struct {
-	config *source.APIConfig
+	config           *providers.APIConfig
+	vitalInfoChannel chan providers.VitalInfo
 }
 
 /*
@@ -38,18 +39,26 @@ type successResponse struct {
 	LineType string `json:"line_type"`
 }
 
+func (s *NumverifySource) VitalInfoChannel() <-chan providers.VitalInfo {
+	return s.vitalInfoChannel
+}
+
+func (s *NumverifySource) CloseVitalInfoChannel() {
+	close(s.vitalInfoChannel)
+}
+
 func Initialize() (*NumverifySource, error) {
 	apiKey, exists := os.LookupEnv("PROVIDERS__NUMVERIFY_API_KEY")
 	if !exists {
 		return &NumverifySource{}, fmt.Errorf("Error, apiKey environment variable not set")
 	}
 	baseUrl := "https://apilayer.net/api/validate?access_key=" + apiKey + "&number=<NUMBER>&country_code=JP"
-	config := source.NewApiConfig(apiKey, baseUrl)
-	return &NumverifySource{config: config}, nil
+	config := providers.NewApiConfig(apiKey, baseUrl)
+	return &NumverifySource{config: config, vitalInfoChannel: make(chan providers.VitalInfo)}, nil
 }
 
-func (s *NumverifySource) GetData(phoneNumber string) (source.NumberDetails, error) {
-	var data source.NumberDetails
+func (s *NumverifySource) GetData(phoneNumber string) (providers.NumberDetails, error) {
+	var data providers.NumberDetails
 	requestUrl := strings.Replace(s.config.BaseUrl, "<NUMBER>", phoneNumber, 1)
 	res, err := s.config.HttpClient.Get(requestUrl)
 	if err != nil {
@@ -80,7 +89,7 @@ func (s *NumverifySource) GetData(phoneNumber string) (source.NumberDetails, err
 		return data, err
 	}
 	data.Number = phoneNumber
-	data.LineType = lineType
+	data.VitalInfo.LineType = lineType
 	data.Carrier = successResponse.carrier
 	data.BusinessDetails.LocationDetails.City = successResponse.location
 
